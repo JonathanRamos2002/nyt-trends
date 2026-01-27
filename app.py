@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import os
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+from dotenv import load_dotenv
+from pynytimes import NYTAPI
 
-from nyt import get_api_key
-from src.nyt_client import NYTClient
 from src.engagement import build_engagement_table
 
 
@@ -15,7 +16,7 @@ from src.engagement import build_engagement_table
 st.set_page_config(page_title="NYT Trends Dashboard", layout="wide")
 st.title("NYT Live Trends (Top Stories + Engagement)")
 st.caption(
-    "Engagement uses NYT 'Most Popular' lists (viewed/shared/emailed). "
+    "Engagement uses NYT 'Most Popular' lists (viewed/shared). "
     "Time is a reading-time proxy. Keywords are extracted from each article's title + abstract."
 )
 
@@ -31,12 +32,11 @@ with st.sidebar:
         index=0,
     )
     period = st.selectbox("Most Popular period (days)", [1, 7, 30], index=1)
-    share_type = st.selectbox("Shares source", ["facebook", "email"], index=0)
+    share_type = st.selectbox("Shares source", ["facebook"], index=0)
 
     st.subheader("Engagement weights")
-    w_views = st.slider("Views", 0.0, 1.0, 0.40, 0.05)
-    w_shares = st.slider("Shares", 0.0, 1.0, 0.30, 0.05)
-    w_emails = st.slider("Emails", 0.0, 1.0, 0.20, 0.05)
+    w_views = st.slider("Views", 0.0, 1.0, 0.50, 0.05)
+    w_shares = st.slider("Shares", 0.0, 1.0, 0.40, 0.05)
     w_time = st.slider("Time (proxy)", 0.0, 1.0, 0.10, 0.05)
 
     st.subheader("Keywords")
@@ -47,32 +47,46 @@ with st.sidebar:
     refresh = st.button("Refresh now")
 
 # Normalize weights
-wsum = w_views + w_shares + w_emails + w_time
-weights = (0.40, 0.30, 0.20, 0.10) if wsum == 0 else (w_views / wsum, w_shares / wsum, w_emails / wsum, w_time / wsum)
-st.sidebar.caption(f"Normalized → views={weights[0]:.2f}, shares={weights[1]:.2f}, emails={weights[2]:.2f}, time={weights[3]:.2f}")
+wsum = w_views + w_shares + w_time
+weights = (0.50, 0.40, 0.10) if wsum == 0 else (w_views / wsum, w_shares / wsum, w_time / wsum)
+st.sidebar.caption(f"Normalized → views={weights[0]:.2f}, shares={weights[1]:.2f}, time={weights[2]:.2f}")
+weights = (0.50, 0.40, 0.10) if wsum == 0 else (w_views / wsum, w_shares / wsum, w_time / wsum)
+st.sidebar.caption(f"Normalized → views={weights[0]:.2f}, shares={weights[1]:.2f}, time={weights[2]:.2f}")
+
+# Load environment
+load_dotenv()
+api_key = os.getenv("NYT_API_KEY")
+if not api_key:
+    st.error("NYT_API_KEY not found in environment (.env)")
+    st.stop()
 
 
-# -----------------------------
 # Client + caching
-# -----------------------------
 @st.cache_resource
-def get_client() -> NYTClient:
-    return NYTClient(api_key=get_api_key())
+def get_client() -> NYTAPI:
+    return NYTAPI(key=api_key, parse_dates=True)
 
 TTL = 300
 
 @st.cache_data(ttl=TTL)
 def fetch_top_stories(section_name: str) -> list[dict]:
-    return get_client().top_stories(section=section_name)
+    try:
+        articles = get_client().top_stories(section=section_name)
+        return articles if isinstance(articles, list) else []
+    except Exception as e:
+        st.error(f"Error fetching top stories: {e}")
+        return []
 
 @st.cache_data(ttl=TTL)
-def fetch_most_popular(period_days: int, share_source: str) -> tuple[list[dict], list[dict], list[dict]]:
-    c = get_client()
-    return (
-        c.most_viewed(period=period_days),
-        c.most_shared(period=period_days, share_type=share_source),
-        c.most_emailed(period=period_days),
-    )
+def fetch_most_popular(period_days: int, share_source: str) -> tuple[list[dict], list[dict]]:
+    try:
+        client = get_client()
+        viewed = client.most_viewed(days=period_days) or []
+        shared = client.most_shared(days=period_days, method=share_source) or []
+        return (viewed, shared)
+    except Exception as e:
+        st.error(f"Error fetching most popular: {e}")
+        return [], []
 
 if refresh:
     st.cache_data.clear()
@@ -121,12 +135,12 @@ def per_article_keywords(df: pd.DataFrame, k: int, ngram_range=(1, 2)) -> pd.Ser
 # Fetch data
 # -----------------------------
 top_raw = fetch_top_stories(section)
-viewed, shared, emailed = fetch_most_popular(period, share_type)
+viewed, shared = fetch_most_popular(period, share_type)
 
 # -----------------------------
 # Build engagement table from Most Popular
 # -----------------------------
-engagement_df = build_engagement_table(viewed=viewed, emailed=emailed, shared=shared, weights=weights)
+engagement_df = build_engagement_table(viewed=viewed, shared=shared, weights=weights)
 
 # Ensure title/abstract exist (Most Popular items usually have both, but be safe)
 if "abstract" not in engagement_df.columns:
@@ -157,13 +171,13 @@ top_df = pd.DataFrame(
 top_df["keywords"] = per_article_keywords(top_df, k=per_article_k, ngram_range=(ngram_min, ngram_max))
 
 # Join engagement scores onto top stories
-join_cols = ["url", "engagement_score", "views_score", "shares_score", "emails_score", "time_score"]
+join_cols = ["url", "engagement_score", "views_score", "shares_score", "time_score"]
 join_cols = [c for c in join_cols if c in engagement_df.columns]
 scores = engagement_df[join_cols].copy()
 
 top_scored_df = top_df.merge(scores, on="url", how="left")
 
-for c in ["engagement_score", "views_score", "shares_score", "emails_score", "time_score"]:
+for c in ["engagement_score", "views_score", "shares_score", "time_score"]:
     if c in top_scored_df.columns:
         top_scored_df[c] = top_scored_df[c].fillna(0.0)
 
@@ -178,7 +192,7 @@ left, right = st.columns(2)
 with left:
     st.subheader(f"Most Popular — Ranked by engagement_score (period={period}, shares={share_type})")
     display_cols = [
-        "engagement_score", "views_score", "shares_score", "emails_score", "time_score",
+        "engagement_score", "views_score", "shares_score", "time_score",
         "title", "abstract", "keywords", "section", "published_date", "url"
     ]
     display_cols = [c for c in display_cols if c in engagement_df.columns]
@@ -187,7 +201,7 @@ with left:
 with right:
     st.subheader(f"Top Stories ({section}) — Ranked by engagement_score (URL match)")
     display_cols = [
-        "engagement_score", "views_score", "shares_score", "emails_score", "time_score",
+        "engagement_score", "views_score", "shares_score", "time_score",
         "title", "abstract", "keywords", "published_date", "byline", "url"
     ]
     display_cols = [c for c in display_cols if c in top_scored_df.columns]
