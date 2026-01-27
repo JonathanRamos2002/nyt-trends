@@ -32,7 +32,7 @@ with st.sidebar:
         index=0,
     )
     period = st.selectbox("Most Popular period (days)", [1, 7, 30], index=1)
-    share_type = st.selectbox("Shares source", ["facebook"], index=0)
+    share_type = st.selectbox("Shares source", ["facebook", ""], index=0)
 
     st.subheader("Engagement weights")
     w_views = st.slider("Views", 0.0, 1.0, 0.50, 0.05)
@@ -48,8 +48,6 @@ with st.sidebar:
 
 # Normalize weights
 wsum = w_views + w_shares + w_time
-weights = (0.50, 0.40, 0.10) if wsum == 0 else (w_views / wsum, w_shares / wsum, w_time / wsum)
-st.sidebar.caption(f"Normalized → views={weights[0]:.2f}, shares={weights[1]:.2f}, time={weights[2]:.2f}")
 weights = (0.50, 0.40, 0.10) if wsum == 0 else (w_views / wsum, w_shares / wsum, w_time / wsum)
 st.sidebar.caption(f"Normalized → views={weights[0]:.2f}, shares={weights[1]:.2f}, time={weights[2]:.2f}")
 
@@ -190,7 +188,7 @@ top_scored_df = top_scored_df.sort_values("engagement_score", ascending=False).r
 left, right = st.columns(2)
 
 with left:
-    st.subheader(f"Most Popular — Ranked by engagement_score (period={period}, shares={share_type})")
+    st.subheader(f"Most Popular — Ranked by engagement_score (period={period} days)")
     display_cols = [
         "engagement_score", "views_score", "shares_score", "time_score",
         "title", "abstract", "keywords", "section", "published_date", "url"

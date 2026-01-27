@@ -61,6 +61,7 @@ def build_engagement_table(
         est_minutes = estimate_read_minutes(text)
         rows.append(
             {
+                "abstract": a.get("abstract", ""),
                 "url": url,
                 "title": a.get("title", ""),
                 "section": a.get("section", ""),
