@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from pynytimes import NYTAPI
 
 from src.engagement import build_engagement_table
+from src.keywords import extract_keywords_for_articles
 
 
 # -----------------------------
@@ -90,66 +91,61 @@ if refresh:
     st.cache_data.clear()
 
 
-# -----------------------------
-# Keyword extraction per article (minimal, local)
-# -----------------------------
-def per_article_keywords(df: pd.DataFrame, k: int, ngram_range=(1, 2)) -> pd.Series:
-    """
-    Returns a Series of comma-separated keywords/phrases for each row based on that row's text.
-    Uses TF-IDF fitted on the full set, then takes top-k terms for each document.
-    """
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    import numpy as np
-
-    texts = (
-        df["title"].fillna("").astype(str) + " " + df["abstract"].fillna("").astype(str)
-    ).tolist()
-
-    # If everything is empty, just return blanks
-    if not any(t.strip() for t in texts):
-        return pd.Series([""] * len(df), index=df.index)
-
-    vec = TfidfVectorizer(stop_words="english", ngram_range=ngram_range, max_features=8000)
-    X = vec.fit_transform(texts)  # shape = (n_docs, n_terms)
-    terms = vec.get_feature_names_out()
-
-    keywords = []
-    for i in range(X.shape[0]):
-        row = X.getrow(i)
-        if row.nnz == 0:
-            keywords.append("")
-            continue
-        # Get top-k indices by tfidf score for this document
-        scores = row.data
-        idxs = row.indices
-        top = np.argsort(scores)[-k:][::-1]
-        kws = [terms[idxs[j]] for j in top]
-        keywords.append(", ".join(kws))
-
-    return pd.Series(keywords, index=df.index)
-
-
-# -----------------------------
+# ----------------------------- 
 # Fetch data
-# -----------------------------
+# ----------------------------- 
 top_raw = fetch_top_stories(section)
 viewed, shared = fetch_most_popular(period, share_type)
 
-# -----------------------------
+# DEBUG: Show data flow
+print(f"\nDATA FLOW DEBUG")
+print(f"├─ Top Stories ({section}): {len(top_raw)} articles")
+if top_raw:
+    print(f"│  └─ Sample: {top_raw[0].get('title', 'N/A')[:60]}")
+    print(f"│  └─ Keys: {list(top_raw[0].keys())}")
+print(f"├─ Most Viewed (last {period} days): {len(viewed)} articles")
+if viewed:
+    print(f"│  └─ Sample: {viewed[0].get('title', 'N/A')[:60]}")
+print(f"└─ Most Shared (last {period} days): {len(shared)} articles")
+if shared:
+    print(f"   └─ Sample: {shared[0].get('title', 'N/A')[:60]}")
+
+# ----------------------------- 
 # Build engagement table from Most Popular
-# -----------------------------
+# ----------------------------- 
 engagement_df = build_engagement_table(viewed=viewed, shared=shared, weights=weights)
+
+print(f"\nENGAGEMENT TABLE")
+print(f"├─ Total articles: {len(engagement_df)}")
+print(f"├─ Columns: {list(engagement_df.columns)}")
+print(f"├─ Sample row:")
+if len(engagement_df) > 0:
+    sample = engagement_df.iloc[0]
+    print(f"│  ├─ URL: {sample['url'][:80]}...")
+    print(f"│  ├─ Title: {sample['title'][:60]}")
+    print(f"│  ├─ Scores (views/shares/time): {sample['views_score']}/{sample['shares_score']}/{sample['time_score']}")
+    print(f"│  └─ Engagement Score: {sample['engagement_score']} (source: {sample['engagement_source']})")
+    
+# Check URL coverage
+urls_with_data = engagement_df[engagement_df['engagement_source'] != '']['url'].nunique()
+print(f"└─ URLs with engagement data: {urls_with_data}/{len(engagement_df)}")
 
 # Ensure title/abstract exist (Most Popular items usually have both, but be safe)
 if "abstract" not in engagement_df.columns:
     engagement_df["abstract"] = ""
 
-# Add per-article keywords to engagement table
-engagement_df["keywords"] = per_article_keywords(
-    engagement_df.rename(columns={"title": "title", "abstract": "abstract"}),
+# Extract keywords once for engagement table and get global top terms
+engagement_df["keywords"], global_top_terms = extract_keywords_for_articles(
+    engagement_df,
     k=per_article_k,
     ngram_range=(ngram_min, ngram_max),
 )
+
+print(f"\nKEYWORDS EXTRACTED")
+print(f"└─ Global top terms: {len(global_top_terms)} terms")
+print(f"   └─ Sample terms:")
+for _, row in global_top_terms.head(5).iterrows():
+    print(f"      └─ {row['term']}: {row['score']:.4f}")
 
 # -----------------------------
 # Build Top Stories DF and score via URL join
@@ -166,10 +162,14 @@ top_df = pd.DataFrame(
 )
 
 # Add per-article keywords to top stories table
-top_df["keywords"] = per_article_keywords(top_df, k=per_article_k, ngram_range=(ngram_min, ngram_max))
+top_df["keywords"], _ = extract_keywords_for_articles(
+    top_df,
+    k=per_article_k,
+    ngram_range=(ngram_min, ngram_max),
+)
 
-# Join engagement scores onto top stories
-join_cols = ["url", "engagement_score", "views_score", "shares_score", "time_score"]
+# Join engagement scores onto top stories (includes engagement_source indicator)
+join_cols = ["url", "engagement_score", "views_score", "shares_score", "time_score", "engagement_source"]
 join_cols = [c for c in join_cols if c in engagement_df.columns]
 scores = engagement_df[join_cols].copy()
 
@@ -179,7 +179,26 @@ for c in ["engagement_score", "views_score", "shares_score", "time_score"]:
     if c in top_scored_df.columns:
         top_scored_df[c] = top_scored_df[c].fillna(0.0)
 
+# Fill engagement_source with indicator for stories without engagement data
+top_scored_df["engagement_source"] = top_scored_df["engagement_source"].fillna("no data")
+
 top_scored_df = top_scored_df.sort_values("engagement_score", ascending=False).reset_index(drop=True)
+
+# DEBUG: Show merge results
+print(f"\n🔗 TOP STORIES MERGE")
+print(f"├─ Top Stories count: {len(top_df)}")
+print(f"├─ Matched with engagement data: {(top_scored_df['engagement_source'] != 'no data').sum()}")
+print(f"├─ Without engagement data: {(top_scored_df['engagement_source'] == 'no data').sum()}")
+if len(top_scored_df) > 0:
+    matched = top_scored_df[top_scored_df['engagement_source'] != 'no data']
+    if len(matched) > 0:
+        print(f"└─ Top matched article:")
+        top_match = matched.iloc[0]
+        print(f"   ├─ Title: {top_match['title'][:60]}")
+        print(f"   ├─ Score: {top_match['engagement_score']}")
+        print(f"   └─ From: {top_match['engagement_source']}")
+    else:
+        print(f"└─ ⚠️  No Top Stories matched engagement data")
 
 
 # -----------------------------
@@ -198,8 +217,9 @@ with left:
 
 with right:
     st.subheader(f"Top Stories ({section}) — Ranked by engagement_score (URL match)")
+    st.caption("💡 Tip: 'no data' in source means article didn't appear in Most Popular lists")
     display_cols = [
-        "engagement_score", "views_score", "shares_score", "time_score",
+        "engagement_score", "engagement_source", "views_score", "shares_score", "time_score",
         "title", "abstract", "keywords", "published_date", "byline", "url"
     ]
     display_cols = [c for c in display_cols if c in top_scored_df.columns]
@@ -213,24 +233,97 @@ st.divider()
 # -----------------------------
 st.subheader("Top Keywords & Key Phrases (Top Stories corpus)")
 
-# Build corpus for chart
-texts = (top_df["title"].fillna("").astype(str) + " " + top_df["abstract"].fillna("").astype(str)).tolist()
-
-# Compute global TF-IDF terms (sum across docs)
-from sklearn.feature_extraction.text import TfidfVectorizer
-vec = TfidfVectorizer(stop_words="english", ngram_range=(ngram_min, ngram_max), max_features=8000)
-X = vec.fit_transform(texts)
-scores = X.sum(axis=0).A1
-terms = vec.get_feature_names_out()
-
-terms_df = (
-    pd.DataFrame({"term": terms, "score": scores})
-    .sort_values("score", ascending=False)
-    .head(25)
-    .reset_index(drop=True)
-)
-
-fig = px.bar(terms_df, x="score", y="term", orientation="h")
+fig = px.bar(global_top_terms, x="score", y="term", orientation="h", title="TF-IDF Scores")
 fig.update_layout(yaxis={"categoryorder": "total ascending"})
 st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
+
+# ----------------------------- 
+# Analytics Dashboard
+# ----------------------------- 
+st.header("📊 Analytics & Insights")
+
+# Two column layout for main charts
+col1, col2 = st.columns(2)
+
+# Chart 1: Engagement by Section
+with col1:
+    st.subheader("Engagement by Section")
+    
+    # Calculate total engagement per section
+    section_engagement = engagement_df.groupby('section')['engagement_score'].agg(['sum', 'count']).sort_values('sum', ascending=False)
+    section_engagement = section_engagement[section_engagement['sum'] > 0]  # Only sections with data
+    
+    if len(section_engagement) > 0:
+        fig_section = px.bar(
+            section_engagement.reset_index(),
+            x='section',
+            y='sum',
+            hover_data=['count'],
+            title="Total Engagement Score by Section",
+            labels={'sum': 'Total Engagement', 'count': 'Article Count'}
+        )
+        fig_section.update_layout(xaxis_title="Section", yaxis_title="Total Engagement Score")
+        st.plotly_chart(fig_section, use_container_width=True)
+        
+        # Summary stats
+        with st.expander("📈 Section Stats"):
+            for idx, (section, row) in enumerate(section_engagement.iterrows()):
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.metric(f"{section}", f"{row['sum']:.1f}", delta=f"{int(row['count'])} articles")
+    else:
+        st.info("No engagement data available for sections")
+
+# Chart 2: Views vs Shares Scatter
+with col2:
+    st.subheader("Views vs Shares Analysis")
+    
+    # Filter for articles with data
+    plot_df = engagement_df[engagement_df['engagement_source'] != 'no data'].copy()
+    
+    if len(plot_df) > 0:
+        fig_scatter = px.scatter(
+            plot_df,
+            x='views_score',
+            y='shares_score',
+            size='engagement_score',
+            color='section',
+            hover_data=['title', 'engagement_score'],
+            title="Views Score vs Shares Score",
+            labels={'views_score': 'Views Score', 'shares_score': 'Shares Score'}
+        )
+        fig_scatter.update_layout(
+            xaxis_title="Views Score (0-100)",
+            yaxis_title="Shares Score (0-100)",
+            height=500
+        )
+        st.plotly_chart(fig_scatter, use_container_width=True)
+        
+        # Key insights
+        with st.expander("💡 Key Insights"):
+            # Most viewed
+            most_viewed = plot_df.nlargest(1, 'views_score').iloc[0]
+            st.write(f"**Most Viewed:**")
+            st.write(f"- {most_viewed['title'][:80]}")
+            st.write(f"- Views: {most_viewed['views_score']:.0f}, Shares: {most_viewed['shares_score']:.0f}")
+            
+            # Most shared
+            most_shared = plot_df.nlargest(1, 'shares_score').iloc[0]
+            st.write(f"\n**Most Shared:**")
+            st.write(f"- {most_shared['title'][:80]}")
+            st.write(f"- Views: {most_shared['views_score']:.0f}, Shares: {most_shared['shares_score']:.0f}")
+            
+            # Correlation
+            correlation = plot_df['views_score'].corr(plot_df['shares_score'])
+            st.write(f"\n**Views-Shares Correlation:** {correlation:.2f}")
+            if correlation < 0.3:
+                st.write("🔍 Low correlation = Different content gets viewed vs shared")
+            elif correlation < 0.7:
+                st.write("🔍 Moderate correlation = Some alignment between views and shares")
+            else:
+                st.write("🔍 High correlation = Views and shares move together")
+    else:
+        st.info("No articles with engagement data to analyze")
 

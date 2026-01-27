@@ -40,6 +40,17 @@ def build_engagement_table(
     shared: List[Dict[str, Any]],
     weights: Tuple[float, float, float] = (0.50, 0.40, 0.10),
 ) -> pd.DataFrame:
+    """
+    Build engagement-scored DataFrame from viewed and shared articles.
+    
+    Args:
+        viewed: List of most-viewed articles
+        shared: List of most-shared articles
+        weights: (w_views, w_shares, w_time) tuple that should sum to 1.0
+    
+    Returns:
+        DataFrame with engagement scores and source indicators
+    """
     w_views, w_shares, w_time = weights
 
     views_rank = _rank_scores(viewed)
@@ -59,6 +70,14 @@ def build_engagement_table(
         a = article_by_url.get(url, {})
         text = _safe_text(a)
         est_minutes = estimate_read_minutes(text)
+        
+        # Track where engagement data came from
+        appeared_in = []
+        if url in views_rank:
+            appeared_in.append("viewed")
+        if url in shares_rank:
+            appeared_in.append("shared")
+        
         rows.append(
             {
                 "abstract": a.get("abstract", ""),
@@ -69,6 +88,7 @@ def build_engagement_table(
                 "views_raw": views_rank.get(url, 0.0),
                 "shares_raw": shares_rank.get(url, 0.0),
                 "time_raw": est_minutes,
+                "engagement_source": ", ".join(appeared_in),  # e.g., "viewed, shared" or just "viewed"
             }
         )
 
