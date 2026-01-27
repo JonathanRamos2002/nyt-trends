@@ -2,7 +2,7 @@
 
 A **real-time analytics dashboard** that combines editorial judgment with reader engagement metrics to identify trending news topics across The New York Times.
 
-## 🎯 Overview
+##  Overview
 
 This dashboard answers: **"What are readers actually engaging with?"** by overlaying engagement data (views, shares, reading time) onto editorial picks (Top Stories).
 
@@ -10,16 +10,16 @@ This dashboard answers: **"What are readers actually engaging with?"** by overla
 
 ---
 
-## ✨ Features
+##  Features
 
-### 📊 Core Analytics
+###  Core Analytics
 - **Engagement Scoring** - Combines views, shares, and reading time (user-adjustable weights)
 - **Section Analysis** - See which news categories drive engagement
 - **Views vs Shares** - Discover what content people consume vs promote
 - **Trending Keywords** - Top 10 keywords in highest-engagement articles
 - **Top Stories Integration** - Match editorial picks against engagement data
 
-### 🔧 Technical Highlights
+###  Technical Highlights
 - **Clean Architecture** - Modular, testable code with separation of concerns
 - **Efficient NLP** - Single TF-IDF pass for per-article + global keyword extraction
 - **Data Quality** - Clear indicators for articles without engagement data
@@ -28,7 +28,7 @@ This dashboard answers: **"What are readers actually engaging with?"** by overla
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prerequisites
 - Python 3.8+
@@ -62,7 +62,7 @@ Visit `http://localhost:8501` in your browser.
 
 ---
 
-## 📖 How It Works
+##  How It Works
 
 ### Data Flow
 
@@ -92,7 +92,7 @@ All scores normalized to 0-100 scale using min-max normalization.
 
 ---
 
-## 🎛️ Configuration
+##  Configuration
 
 ### Sidebar Controls
 
@@ -110,7 +110,7 @@ All scores normalized to 0-100 scale using min-max normalization.
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 nyt-trends/
@@ -132,7 +132,7 @@ nyt-trends/
 
 ---
 
-## 📊 Dashboard Sections
+##  Dashboard Sections
 
 ### 1. **Most Popular Table** (Left)
 Ranked by engagement score. Shows views, shares, time estimates, and extracted keywords.
@@ -168,20 +168,20 @@ Top 10 keywords from the 10 highest-engagement articles with full article contex
 
 ---
 
-## 📄 License
+##  License
 
 See [LICENSE](LICENSE) file.
 
 ---
 
-## 👤 Authors
+##  Authors
 
 Jonathan Ramos & 
 Chris Koelsch
 
 ---
 
-## 📚 Resources
+##  Resources
 
 - [pynytimes Documentation](https://github.com/michadenheijer/pynytimes)
 - [NYT API Docs](https://developer.nytimes.com/)
