@@ -1,0 +1,9 @@
+@software{Den_Heijer_pynytimes_2023,
+    author = {Den Heijer, Micha},
+    license = {MIT},
+    title = {{pynytimes}},
+    url = {https://github.com/michadenheijer/pynytimes},
+    version = {[CITATION VERSION]},
+    year = {[CITATION YEAR]},
+    doi = {10.5281/zenodo.7821090}
+}
