@@ -14,7 +14,7 @@ import numpy as np
 def extract_keywords_for_articles(
     df: pd.DataFrame,
     k: int = 6,
-    ngram_range: tuple[int, int] = (1, 2),
+    ngram_range: tuple[int,int] = (2,3),
 ) -> tuple[pd.Series, pd.DataFrame]:
     """
     Extract keywords for each article using TF-IDF.
